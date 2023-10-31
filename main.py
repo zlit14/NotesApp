@@ -1,7 +1,11 @@
 import sys
 import sqlite3
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTextEdit, QPushButton, QListWidget,\
+import json
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTextEdit, QPushButton, QListWidget, \
     QAction, QListWidgetItem, QLineEdit, QMessageBox, QFontDialog, QComboBox
+from PyQt5.QtWidgets import QFileDialog
+
+
 
 class NotesApp(QMainWindow):
     def __init__(self):
@@ -28,7 +32,6 @@ class NotesApp(QMainWindow):
         # Create a QTextEdit for note content
         self.text_edit = QTextEdit()
         layout.addWidget(self.text_edit)
-
 
         # Create a Save button
         save_button = QPushButton('Save')
@@ -74,16 +77,59 @@ class NotesApp(QMainWindow):
         format_toolbar.addWidget(italic_button)
         format_toolbar.addWidget(font_size_button)
 
-    def add_note_to_list(self, note_id, title, content, color, checked, last_edit_time, font_size, bold, italic):
-        pass
+        self.search_edit = QLineEdit()
+        self.search_edit.setPlaceholderText("Поиск")
+        layout.addWidget(self.search_edit)
+        self.search_edit.textChanged.connect(self.search_notes)
+
+        # Create an Export button
+        export_button = QPushButton('Export')
+        export_button.clicked.connect(self.export_notes)
+        layout.addWidget(export_button)
+
+    def add_to_favorites(self):
+        current_item = self.list_widget.currentItem()
+        if current_item:
+            note_id = current_item.note_id
+            self.cursor.execute("UPDATE notes SET is_favorite = 1 WHERE id = ?", (note_id,))
+            self.conn.commit()
+            self.load_notes()
+
+    def search_notes(self):
+        search_query = self.search_edit.text()
+        if search_query:
+            self.list_widget.clear()
+            self.cursor.execute("SELECT id, title FROM notes WHERE title LIKE ? OR content LIKE ?",
+                                (f"%{search_query}%", f"%{search_query}%"))
+            notes = self.cursor.fetchall()
+            for note in notes:
+                item = QListWidgetItem(note[1])
+                item.note_id = note[0]
+                self.list_widget.addItem(item)
+        else:
+            self.load_notes()
+
+    def add_note_to_list(self, note_id, title, content, is_favorite):
+        item = QListWidgetItem(title)
+        item.note_id = note_id
+        item.is_favorite = is_favorite
+
     def load_notes(self):
         self.list_widget.clear()
-        self.cursor.execute(
-            "SELECT id, title, content, color, checked, last_edit_time, font_size, bold, italic FROM notes WHERE title LIKE ?",
-            (f"%{self.search_query}%",))
+        self.cursor.execute("SELECT id, title, content, is_favorite FROM notes")
         notes = self.cursor.fetchall()
         for note in notes:
-            self.add_note_to_list(note[0], note[1], note[2], note[3], note[4], note[5], note[6], note[7], note[8])
+            self.add_note_to_list(note[0], note[1], note[2], note[3])
+
+    def mark_favorite(self, state):
+        current_item = self.list_widget.currentItem()
+        if current_item:
+            note_id = current_item.note_id
+            is_favorite = state == 2  # 2 represents Checked state in QCheckBox
+            self.cursor.execute("UPDATE notes SET is_favorite = ? WHERE id = ?", (is_favorite, note_id))
+            self.conn.commit()
+            self.load_notes()
+
 
     def toggle_bold(self):
         cursor = self.text_edit.textCursor()
@@ -98,15 +144,7 @@ class NotesApp(QMainWindow):
         cursor.setCharFormat(fmt)
 
     def change_font_size(self):
-        cursor = self.text_edit.textCursor()
-        fmt = cursor.charFormat()
-        ok, font = QFontDialog.getFont(fmt)
-        if ok:
-            cursor.setCharFormat(fmt)
-            cursor.select(QTextCursor.Document)
-            cursor.setCharFormat(fmt)
-            self.text_edit.setTextCursor(cursor)
-
+        pass
 
     def edit_note(self):
         current_item = self.list_widget.currentItem()
@@ -117,7 +155,6 @@ class NotesApp(QMainWindow):
             self.conn.commit()
             self.load_notes()
 
-
     def init_db(self):
         self.conn = sqlite3.connect('notes.db')
         self.cursor = self.conn.cursor()
@@ -125,7 +162,8 @@ class NotesApp(QMainWindow):
             CREATE TABLE IF NOT EXISTS notes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT,
-                content TEXT
+                content TEXT,
+                is_favorite TEXT
             )
         ''')
         self.conn.commit()
@@ -151,8 +189,9 @@ class NotesApp(QMainWindow):
 
     def load_selected_note(self, item):
         note_id = item.note_id
-        self.cursor.execute("SELECT content FROM notes WHERE id=?", (note_id,))
-        content = self.cursor.fetchone()[0]
+        self.cursor.execute("SELECT title, content FROM notes WHERE id=?", (note_id,))
+        title, content = self.cursor.fetchone()
+        self.title_edit.setText(title)
         self.text_edit.setPlainText(content)
 
     def save_note(self):
@@ -172,12 +211,47 @@ class NotesApp(QMainWindow):
         if current_item:
             note_id = current_item.note_id
             confirmation = QMessageBox.question(self, 'Удалить заметку', 'Вы точно хотите удалить эту заметку?',
-                                               QMessageBox.Yes | QMessageBox.No)
+                                                QMessageBox.Yes | QMessageBox.No)
             if confirmation == QMessageBox.Yes:
                 self.cursor.execute("DELETE FROM notes WHERE id = ?", (note_id,))
                 self.conn.commit()
                 self.load_notes()
                 self.text_edit.clear()
+
+    def export_notes(self):
+        options = QFileDialog.Options()
+        options |= QFileDialog.ReadOnly  # Добавляем опцию для выбора формата файла
+
+        file_dialog = QFileDialog()
+        file_dialog.setOptions(options)
+        file_dialog.setNameFilter("JSON Files (*.json);;Text Files (*.txt);;All Files (*)")
+        file_dialog.setWindowTitle("Экспорт заметок в файл")
+
+        if file_dialog.exec_():
+            file_name = file_dialog.selectedFiles()[0]
+            selected_filter = file_dialog.selectedNameFilter()
+
+            notes_data = []
+            self.cursor.execute("SELECT title, content FROM notes")
+            notes = self.cursor.fetchall()
+            for note in notes:
+                title, content = note
+                notes_data.append({"title": title, "content": content})
+
+            try:
+                if selected_filter == "JSON Files (*.json)":
+                    with open(file_name, 'w', encoding='utf-8') as file:
+                        json.dump(notes_data, file, ensure_ascii=False, indent=4)
+                    QMessageBox.information(self, 'Экспорт завершен', 'Заметки успешно экспортированы в JSON файл.')
+                elif selected_filter == "Text Files (*.txt)":
+                    with open(file_name, 'w', encoding='utf-8') as file:
+                        for note in notes_data:
+                            file.write(f"Title: {note['title']}\n\n{note['content']}\n\n\n")
+                    QMessageBox.information(self, 'Экспорт завершен',
+                                            'Заметки успешно экспортированы в текстовый файл.')
+            except Exception as e:
+                QMessageBox.critical(self, 'Ошибка при экспорте', f'Произошла ошибка при экспорте заметок: {str(e)}')
+
 
 if __name__ == '__main__':
     stylesheet = """
@@ -224,7 +298,8 @@ if __name__ == '__main__':
 
     QLineEdit {
         background-color: #000000;
-        border: 1px solid #cccccc;
+        border: 1px solid #ffffff;
+        color: #ffffff;
     }
 
     QCheckBox {
@@ -237,4 +312,3 @@ if __name__ == '__main__':
     app.setStyleSheet(stylesheet)
     window.show()
     sys.exit(app.exec_())
-
