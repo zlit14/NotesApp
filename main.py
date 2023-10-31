@@ -4,6 +4,8 @@ import json
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTextEdit, QPushButton, QListWidget, \
     QAction, QListWidgetItem, QLineEdit, QMessageBox, QFontDialog, QComboBox
 from PyQt5.QtWidgets import QFileDialog
+from PyQt5.QtWidgets import QColorDialog
+from PyQt5.QtGui import QBrush, QColor
 
 
 class NotesApp(QMainWindow):
@@ -81,6 +83,11 @@ class NotesApp(QMainWindow):
         export_button.clicked.connect(self.export_notes)
         layout.addWidget(export_button)
 
+        # Create a Color button
+        color_button = QPushButton('Выделить цвет')
+        color_button.clicked.connect(self.choose_color)
+        layout.addWidget(color_button)
+
     def search_notes(self):
         search_query = self.search_edit.text()
         if search_query:
@@ -114,10 +121,16 @@ class NotesApp(QMainWindow):
             # Если нет текущей заметки, просто сохраняем новую заметку
             self.save_note()
 
-    def add_note_to_list(self, note_id, title, content, is_favorite):
+    def add_note_to_list(self, note_id, title, content, is_favorite, color):
         item = QListWidgetItem(title)
         item.note_id = note_id
         item.is_favorite = is_favorite
+
+        if color:
+            item.setBackground(QBrush(QColor(color)))
+            item.setData(1, QColor(color))  # Сохраняем цвет в пользовательских данных элемента
+
+        self.list_widget.addItem(item)
 
     def load_notes(self):
         self.list_widget.clear()
@@ -147,6 +160,18 @@ class NotesApp(QMainWindow):
         fmt.setFontItalic(not fmt.fontItalic())
         cursor.setCharFormat(fmt)
 
+    def choose_color(self):
+        current_item = self.list_widget.currentItem()
+        if current_item:
+            color_dialog = QColorDialog()
+            color = color_dialog.getColor()
+            if color.isValid():
+                note_id = current_item.note_id
+                color_name = color.name()
+                self.cursor.execute("UPDATE notes SET color = ? WHERE id = ?", (color_name, note_id))
+                self.conn.commit()
+                self.load_notes()
+
     def change_font_size(self):
         pass
 
@@ -167,7 +192,8 @@ class NotesApp(QMainWindow):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT,
                 content TEXT,
-                is_favorite INTEGER
+                is_favorite INTEGER,
+                color TEXT DEFAULT '#FFFFFF'
             )
         ''')
         self.conn.commit()
@@ -189,20 +215,33 @@ class NotesApp(QMainWindow):
 
     def load_notes(self):
         self.list_widget.clear()
-        self.cursor.execute("SELECT id, title FROM notes")
+        self.cursor.execute("SELECT id, title, content, is_favorite, color FROM notes")
         notes = self.cursor.fetchall()
         for note in notes:
-            item = QListWidgetItem(note[1])
-            item.note_id = note[0]
-            self.list_widget.addItem(item)
+            self.add_note_to_list(note[0], note[1], note[2], note[3], note[4])
 
     def load_selected_note(self, item):
         note_id = item.note_id
         self.current_note_id = note_id  # Устанавливаем текущую заметку
-        self.cursor.execute("SELECT title, content FROM notes WHERE id=?", (note_id,))
-        title, content = self.cursor.fetchone()
+        self.cursor.execute("SELECT title, content, color FROM notes WHERE id=?", (note_id,))
+        title, content, color = self.cursor.fetchone()
         self.title_edit.setText(title)
         self.text_edit.setHtml(content)  # Устанавливаем форматированный текст
+
+        if not color:  # Если цвет отсутствует, то открываем диалоговое окно выбора цвета
+            current_color = QColor()
+            color_dialog = QColorDialog(current_color)
+            color_dialog.setCurrentColor(current_color)
+            color_dialog.colorSelected.connect(self.set_color)
+            color_dialog.exec_()
+
+    def set_color(self, color):
+        if self.current_note_id is not None:
+            note_id = self.current_note_id
+            color_name = color.name()
+            self.cursor.execute("UPDATE notes SET color = ? WHERE id = ?", (color_name, note_id))
+            self.conn.commit()
+            self.load_notes()
 
     def delete_note(self):
         current_item = self.list_widget.currentItem()
@@ -310,6 +349,11 @@ if __name__ == '__main__':
         background-color: #000000;
         border: 1px solid #ffffff;
         color: #ffffff;
+    }
+    
+    .selected-note {
+    background-color: yellow; /* Здесь вы можете указать желаемый цвет выделения */
+    color: black; /* Цвет текста в выделенной заметке */
     }
 
     QCheckBox {
