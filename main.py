@@ -6,7 +6,6 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTe
 from PyQt5.QtWidgets import QFileDialog
 
 
-
 class NotesApp(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -33,11 +32,6 @@ class NotesApp(QMainWindow):
         self.text_edit = QTextEdit()
         layout.addWidget(self.text_edit)
 
-        # Create a Save button
-        save_button = QPushButton('Save')
-        save_button.clicked.connect(self.save_note)
-        layout.addWidget(save_button)
-
         # Create a ListWidget for listing notes
         self.list_widget = QListWidget()
         layout.addWidget(self.list_widget)
@@ -55,10 +49,10 @@ class NotesApp(QMainWindow):
         file_menu.addAction(new_action)
         file_menu.addAction(open_action)
 
-        # Create an Edit button
-        edit_button = QPushButton('Edit')
-        edit_button.clicked.connect(self.edit_note)
-        layout.addWidget(edit_button)
+        # Create a Save/Edit button
+        self.save_edit_button = QPushButton('Save/Edit')
+        self.save_edit_button.clicked.connect(self.save_or_edit_note)
+        layout.addWidget(self.save_edit_button)
 
         # Create a Delete button
         delete_button = QPushButton('Delete')
@@ -87,14 +81,6 @@ class NotesApp(QMainWindow):
         export_button.clicked.connect(self.export_notes)
         layout.addWidget(export_button)
 
-    def add_to_favorites(self):
-        current_item = self.list_widget.currentItem()
-        if current_item:
-            note_id = current_item.note_id
-            self.cursor.execute("UPDATE notes SET is_favorite = 1 WHERE id = ?", (note_id,))
-            self.conn.commit()
-            self.load_notes()
-
     def search_notes(self):
         search_query = self.search_edit.text()
         if search_query:
@@ -108,6 +94,25 @@ class NotesApp(QMainWindow):
                 self.list_widget.addItem(item)
         else:
             self.load_notes()
+
+    def save_or_edit_note(self):
+        if self.current_note_id is not None:
+            # Если есть текущая заметка, то спрашиваем, хочет ли пользователь её редактировать
+            response = QMessageBox.question(self, 'Редактировать заметку', 'Хотите редактировать текущую заметку?',
+                                            QMessageBox.Yes | QMessageBox.No)
+
+            if response == QMessageBox.Yes:
+                # Открываем редактирование текущей заметки
+                self.edit_note()
+            else:
+                # Если пользователь не хочет редактировать, то сохраняем новую заметку
+                self.save_note()
+                self.current_note_id = None
+                self.title_edit.clear()
+                self.text_edit.clear()
+        else:
+            # Если нет текущей заметки, просто сохраняем новую заметку
+            self.save_note()
 
     def add_note_to_list(self, note_id, title, content, is_favorite):
         item = QListWidgetItem(title)
@@ -130,7 +135,6 @@ class NotesApp(QMainWindow):
             self.conn.commit()
             self.load_notes()
 
-
     def toggle_bold(self):
         cursor = self.text_edit.textCursor()
         fmt = cursor.charFormat()
@@ -150,7 +154,7 @@ class NotesApp(QMainWindow):
         current_item = self.list_widget.currentItem()
         if current_item:
             note_id = current_item.note_id
-            new_content = self.text_edit.toPlainText()
+            new_content = self.text_edit.toHtml()  # Получаем и сохраняем форматированный текст
             self.cursor.execute("UPDATE notes SET content = ? WHERE id = ?", (new_content, note_id))
             self.conn.commit()
             self.load_notes()
@@ -163,17 +167,22 @@ class NotesApp(QMainWindow):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 title TEXT,
                 content TEXT,
-                is_favorite TEXT
+                is_favorite INTEGER
             )
         ''')
         self.conn.commit()
 
     def save_note(self):
-        title = 'Sample Title'  # You can implement title input
-        content = self.text_edit.toPlainText()
-        self.cursor.execute("INSERT INTO notes (title, content) VALUES (?, ?)", (title, content))
-        self.conn.commit()
-        self.load_notes()
+        title = self.title_edit.text()
+        content = self.text_edit.toHtml()  # Получаем и сохраняем форматированный текст
+        if title and content:
+            self.cursor.execute("INSERT INTO notes (title, content) VALUES (?, ?)", (title, content))
+            self.conn.commit()
+            self.load_notes()
+            self.title_edit.clear()
+            self.text_edit.clear()
+        else:
+            QMessageBox.warning(self, 'Invalid Input', 'Title and content cannot be empty.')
 
     def new_note(self):
         self.text_edit.clear()
@@ -189,22 +198,11 @@ class NotesApp(QMainWindow):
 
     def load_selected_note(self, item):
         note_id = item.note_id
+        self.current_note_id = note_id  # Устанавливаем текущую заметку
         self.cursor.execute("SELECT title, content FROM notes WHERE id=?", (note_id,))
         title, content = self.cursor.fetchone()
         self.title_edit.setText(title)
-        self.text_edit.setPlainText(content)
-
-    def save_note(self):
-        title = self.title_edit.text()
-        content = self.text_edit.toPlainText()
-        if title and content:
-            self.cursor.execute("INSERT INTO notes (title, content) VALUES (?, ?)", (title, content))
-            self.conn.commit()
-            self.load_notes()
-            self.title_edit.clear()
-            self.text_edit.clear()
-        else:
-            QMessageBox.warning(self, 'Invalid Input', 'Title and content cannot be empty.')
+        self.text_edit.setHtml(content)  # Устанавливаем форматированный текст
 
     def delete_note(self):
         current_item = self.list_widget.currentItem()
@@ -217,6 +215,18 @@ class NotesApp(QMainWindow):
                 self.conn.commit()
                 self.load_notes()
                 self.text_edit.clear()
+
+    def toggle_save_edit_mode(self):
+        if self.edit_mode:
+            self.edit_note()
+            self.save_edit_button.setText('Save/Edit')
+            self.edit_mode = False
+        else:
+            self.current_note_id = None  # Сбрасываем текущую заметку при создании новой
+            self.title_edit.clear()
+            self.text_edit.clear()
+            self.save_edit_button.setText('Save')
+            self.edit_mode = True
 
     def export_notes(self):
         options = QFileDialog.Options()
