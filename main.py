@@ -3,18 +3,19 @@ import sqlite3
 import json
 from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QTextEdit, QPushButton, QListWidget, \
     QAction, QListWidgetItem, QLineEdit, QMessageBox, QFontDialog, QComboBox
-from PyQt5.QtWidgets import QFileDialog
-from PyQt5.QtWidgets import QColorDialog
+from PyQt5.QtWidgets import QFileDialog, QFontDialog, QColorDialog
 from PyQt5.QtGui import QBrush, QColor
 
 
 class NotesApp(QMainWindow):
+    # Конструктор класса
     def __init__(self):
         super().__init__()
         self.init_ui()
         self.init_db()
         self.load_notes()
-
+        self.current_note_id = None  # Инициализируем current_note_id
+    # Инициализация графического пользовательского интерфейса
     def init_ui(self):
         self.setGeometry(100, 100, 800, 600)
         self.setWindowTitle('Заметки')
@@ -43,7 +44,7 @@ class NotesApp(QMainWindow):
         menubar = self.menuBar()
         file_menu = menubar.addMenu('File')
 
-        # Create actions for File menu
+        # создание File menu
         new_action = QAction('New', self)
         new_action.triggered.connect(self.new_note)
         open_action = QAction('Open', self)
@@ -51,13 +52,13 @@ class NotesApp(QMainWindow):
         file_menu.addAction(new_action)
         file_menu.addAction(open_action)
 
-        # Create a Save/Edit button
-        self.save_edit_button = QPushButton('Save/Edit')
+        # создание кнопки Сохранить/Изменить
+        self.save_edit_button = QPushButton('Сохранить/Изменить')
         self.save_edit_button.clicked.connect(self.save_or_edit_note)
         layout.addWidget(self.save_edit_button)
 
-        # Create a Delete button
-        delete_button = QPushButton('Delete')
+        # создание кнопки Удалить
+        delete_button = QPushButton('Удалить')
         delete_button.clicked.connect(self.delete_note)
         layout.addWidget(delete_button)
 
@@ -66,28 +67,26 @@ class NotesApp(QMainWindow):
         bold_button.clicked.connect(self.toggle_bold)
         italic_button = QPushButton('Italic')
         italic_button.clicked.connect(self.toggle_italic)
-        font_size_button = QPushButton('Font Size')
-        font_size_button.clicked.connect(self.change_font_size)
 
         format_toolbar.addWidget(bold_button)
         format_toolbar.addWidget(italic_button)
-        format_toolbar.addWidget(font_size_button)
+
+        # создание кнопки Export
+        export_button = QPushButton('Export')
+        export_button.clicked.connect(self.export_notes)
+        layout.addWidget(export_button)
+
+        # создание кнопки Выделить цвет
+        color_button = QPushButton('Выделить цвет')
+        color_button.clicked.connect(self.choose_color)
+        layout.addWidget(color_button)
 
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Поиск")
         layout.addWidget(self.search_edit)
         self.search_edit.textChanged.connect(self.search_notes)
 
-        # Create an Export button
-        export_button = QPushButton('Export')
-        export_button.clicked.connect(self.export_notes)
-        layout.addWidget(export_button)
-
-        # Create a Color button
-        color_button = QPushButton('Выделить цвет')
-        color_button.clicked.connect(self.choose_color)
-        layout.addWidget(color_button)
-
+    # Поиск заметок по запросу пользователя
     def search_notes(self):
         search_query = self.search_edit.text()
         if search_query:
@@ -101,7 +100,7 @@ class NotesApp(QMainWindow):
                 self.list_widget.addItem(item)
         else:
             self.load_notes()
-
+    # Сохранение или редактирование текущей заметки
     def save_or_edit_note(self):
         if self.current_note_id is not None:
             # Если есть текущая заметка, то спрашиваем, хочет ли пользователь её редактировать
@@ -120,7 +119,7 @@ class NotesApp(QMainWindow):
         else:
             # Если нет текущей заметки, просто сохраняем новую заметку
             self.save_note()
-
+    # Добавление заметки в список заметок
     def add_note_to_list(self, note_id, title, content, is_favorite, color):
         item = QListWidgetItem(title)
         item.note_id = note_id
@@ -132,13 +131,14 @@ class NotesApp(QMainWindow):
 
         self.list_widget.addItem(item)
 
+    # Загрузка всех заметок из базы данных и отображение их в списке
     def load_notes(self):
         self.list_widget.clear()
         self.cursor.execute("SELECT id, title, content, is_favorite FROM notes")
         notes = self.cursor.fetchall()
         for note in notes:
             self.add_note_to_list(note[0], note[1], note[2], note[3])
-
+    # Отметка заметки как избранной или неизбранной
     def mark_favorite(self, state):
         current_item = self.list_widget.currentItem()
         if current_item:
@@ -148,18 +148,21 @@ class NotesApp(QMainWindow):
             self.conn.commit()
             self.load_notes()
 
+    # Включение/выключение жирного шрифта в редакторе заметок
     def toggle_bold(self):
         cursor = self.text_edit.textCursor()
         fmt = cursor.charFormat()
         fmt.setFontWeight(94 if fmt.fontWeight() == 50 else 50)
         cursor.setCharFormat(fmt)
 
+    # Включение/выключение курсива в редакторе заметок
     def toggle_italic(self):
         cursor = self.text_edit.textCursor()
         fmt = cursor.charFormat()
         fmt.setFontItalic(not fmt.fontItalic())
         cursor.setCharFormat(fmt)
 
+    # Выбор цвета для текущей заметки
     def choose_color(self):
         current_item = self.list_widget.currentItem()
         if current_item:
@@ -172,9 +175,13 @@ class NotesApp(QMainWindow):
                 self.conn.commit()
                 self.load_notes()
 
+    # Изменение размера шрифта в редакторе заметок
     def change_font_size(self):
-        pass
+        font, ok = QFontDialog.getFont(self.text_edit.font(), self)
+        if ok:
+            self.text_edit.setFont(font)
 
+    # Редактирование текущей заметки
     def edit_note(self):
         current_item = self.list_widget.currentItem()
         if current_item:
@@ -184,6 +191,7 @@ class NotesApp(QMainWindow):
             self.conn.commit()
             self.load_notes()
 
+    # Инициализация базы данных SQLite
     def init_db(self):
         self.conn = sqlite3.connect('notes.db')
         self.cursor = self.conn.cursor()
@@ -198,6 +206,7 @@ class NotesApp(QMainWindow):
         ''')
         self.conn.commit()
 
+    # Сохранение новой заметки
     def save_note(self):
         title = self.title_edit.text()
         content = self.text_edit.toHtml()  # Получаем и сохраняем форматированный текст
@@ -210,9 +219,11 @@ class NotesApp(QMainWindow):
         else:
             QMessageBox.warning(self, 'Invalid Input', 'Title and content cannot be empty.')
 
+    # Создание новой пустой заметки
     def new_note(self):
         self.text_edit.clear()
 
+    # Загрузка заметки
     def load_notes(self):
         self.list_widget.clear()
         self.cursor.execute("SELECT id, title, content, is_favorite, color FROM notes")
@@ -220,6 +231,7 @@ class NotesApp(QMainWindow):
         for note in notes:
             self.add_note_to_list(note[0], note[1], note[2], note[3], note[4])
 
+    # Загрузка выбранной заметки для редактирования
     def load_selected_note(self, item):
         note_id = item.note_id
         self.current_note_id = note_id  # Устанавливаем текущую заметку
@@ -235,6 +247,7 @@ class NotesApp(QMainWindow):
             color_dialog.colorSelected.connect(self.set_color)
             color_dialog.exec_()
 
+    # Установка цвета для текущей заметки
     def set_color(self, color):
         if self.current_note_id is not None:
             note_id = self.current_note_id
@@ -243,6 +256,7 @@ class NotesApp(QMainWindow):
             self.conn.commit()
             self.load_notes()
 
+    # Удаление выбранной заметки
     def delete_note(self):
         current_item = self.list_widget.currentItem()
         if current_item:
@@ -255,18 +269,19 @@ class NotesApp(QMainWindow):
                 self.load_notes()
                 self.text_edit.clear()
 
+    # Переключение режима "Сохранить/Редактировать"
     def toggle_save_edit_mode(self):
         if self.edit_mode:
             self.edit_note()
-            self.save_edit_button.setText('Save/Edit')
+            self.save_edit_button.setText('Сохранить/Изменить')
             self.edit_mode = False
         else:
             self.current_note_id = None  # Сбрасываем текущую заметку при создании новой
             self.title_edit.clear()
             self.text_edit.clear()
-            self.save_edit_button.setText('Save')
+            self.save_edit_button.setText('Сохранить')
             self.edit_mode = True
-
+    # Экспорт заметок в файл
     def export_notes(self):
         options = QFileDialog.Options()
         options |= QFileDialog.ReadOnly  # Добавляем опцию для выбора формата файла
@@ -301,7 +316,7 @@ class NotesApp(QMainWindow):
             except Exception as e:
                 QMessageBox.critical(self, 'Ошибка при экспорте', f'Произошла ошибка при экспорте заметок: {str(e)}')
 
-
+# Запуск приложения
 if __name__ == '__main__':
     stylesheet = """
     QMainWindow {
@@ -350,7 +365,7 @@ if __name__ == '__main__':
         border: 1px solid #ffffff;
         color: #ffffff;
     }
-    
+
     .selected-note {
     background-color: yellow; /* Здесь вы можете указать желаемый цвет выделения */
     color: black; /* Цвет текста в выделенной заметке */
